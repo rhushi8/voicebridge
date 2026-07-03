@@ -1,0 +1,38 @@
+[
+  {
+    "name": "Rahul Verma",
+    "phone": "+91-98200-11111",
+    "balance": 8200,
+    "due_date": "2026-07-15",
+    "last_payment": { "amount": 1000, "date": "2026-06-08" },
+    "language": "en",
+    "payment_history": [
+      { "amount": 2000, "date": "2026-04-10" },
+      { "amount": 1500, "date": "2026-05-12" },
+      { "amount": 1000, "date": "2026-06-08" }
+    ]
+  },
+  {
+    "name": "Priya Sharma",
+    "phone": "+91-98200-22222",
+    "balance": 0,
+    "due_date": "2026-06-20",
+    "last_payment": { "amount": 4500, "date": "2026-06-18" },
+    "language": "en",
+    "payment_history": [
+      { "amount": 3000, "date": "2026-05-15" },
+      { "amount": 4500, "date": "2026-06-18" }
+    ]
+  },
+  {
+    "name": "Amit Joshi",
+    "phone": "+91-98200-33333",
+    "balance": 45500,
+    "due_date": "2026-05-30",
+    "last_payment": { "amount": 5000, "date": "2026-03-22" },
+    "language": "en",
+    "payment_history": [
+      { "amount": 5000, "date": "2026-03-22" }
+    ]
+  }
+]
