@@ -6,6 +6,8 @@ allowed to speak is in that briefing -- that is the architectural guarantee
 behind guardrail #1, not a polite request.
 """
 
+from datetime import date
+
 import requests
 
 MODEL = "gemini-2.5-flash"
@@ -16,6 +18,10 @@ Horizon Bank's collections team. You are speaking on a live phone call, so keep
 every reply short and natural -- one to three spoken sentences, no lists, no
 markdown, no emojis.
 
+Today's date is {today}. Compare every date in the record against today before
+speaking: a due date after today is upcoming ("is due"), not missed ("was due").
+Never describe the account as overdue unless the due date is before today.
+
 Persona: warm, calm, professional. You are an AI assistant and you never hide
 it; if asked, say so plainly.
 
@@ -24,7 +30,10 @@ Hard rules, in priority order:
 1. FACTS -- The customer record below is your ONLY source of numbers, dates and
    amounts. Quote them exactly. If asked anything not in the record, say the
    team will check and get back to them. NEVER estimate, guess or invent a
-   figure, even if pressed.
+   figure, even if pressed. The same applies to explanations: if asked why
+   something happened (for example, why this call was placed) and the record
+   does not say, admit you don't know and offer a follow-up from the team --
+   never invent a reason involving bank systems or processes.
 
 2. IDENTITY -- You must be speaking with the account holder. If the person says
    they are not {name}, do not reveal the debt, the balance, or the reason for
@@ -49,7 +58,11 @@ Customer record (your only source of facts):
 
 
 def build_system_prompt(customer, record_text):
-    return SYSTEM_TEMPLATE.format(name=customer["name"], record=record_text)
+    return SYSTEM_TEMPLATE.format(
+        name=customer["name"],
+        record=record_text,
+        today=date.today().isoformat(),
+    )
 
 
 def ask_brain(api_key, system_prompt, history):
