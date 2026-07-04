@@ -19,9 +19,10 @@ caller audio → VAD → ASR → endpointing → LLM + RAG → TTS → caller
 ## Roadmap
 
 - [x] Stage 0 — project skeleton, Python 3.12, git
-- [ ] Stage 1 — the brain on rails: text chat, mock customer records, LLM replies
+- [x] Stage 1 — the brain on rails: text chat, mock customer records, LLM replies
       (every number comes from the record, never from the model)
-- [ ] Stage 2 — RAG: grounded answers from bank policy docs, with citations
+- [x] Stage 2 — RAG: embeddings-based retrieval over bank policy docs;
+      the closest policy sections are injected into the briefing every turn
 - [ ] Stage 3 — voice: TTS out, ASR in
 - [ ] Stage 4 — deep config: VAD thresholds + endpointing tuning in config
 - [ ] Stage 5 — bot performance: per-turn latency logs, transcripts, metrics

@@ -11,6 +11,7 @@ import os
 
 from dotenv import load_dotenv
 
+import rag
 from brain import ask_brain, build_system_prompt
 from records import format_record, load_customers
 
@@ -39,9 +40,12 @@ def main():
         print("Gemini key (aistudio.google.com/apikey) after GEMINI_API_KEY=")
         return
 
+    print("Indexing bank policies...")
+    policy_index = rag.build_index(api_key)
+
     customers = load_customers()
     customer = pick_customer(customers)
-    system_prompt = build_system_prompt(customer, format_record(customer))
+    record_text = format_record(customer)
 
     print("\n--- ringing... call connected ---\n")
 
@@ -60,6 +64,13 @@ def main():
             break
 
         history.append({"role": "user", "text": user_text})
+
+        # Fresh retrieval every turn: the briefing is rebuilt with whichever
+        # policy sections are closest in meaning to what the caller just said.
+        policy_chunks = rag.retrieve(api_key, policy_index, user_text)
+        policy_text = rag.format_policy_context(policy_chunks)
+        system_prompt = build_system_prompt(customer, record_text, policy_text)
+
         reply = ask_brain(api_key, system_prompt, history)
         history.append({"role": "model", "text": reply})
         print(f"\nMaya: {reply}\n")
