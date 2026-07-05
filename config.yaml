@@ -1,0 +1,32 @@
+# Voice pipeline configuration.
+# Every knob here changes how the call FEELS. The symptom notes tell you
+# what goes wrong when a value is pushed too far in either direction.
+
+tts:
+  # Voice and prosody (how Maya sounds). en-IN-NeerjaNeural = Indian English.
+  voice: en-IN-NeerjaNeural
+  rate: "+0%"      # faster (+20%) sounds rushed/pushy; slower (-20%) sounds robotic
+  pitch: "+0Hz"    # small changes only; large ones sound unnatural
+  volume: "+0%"
+
+asr:
+  # Speech-to-text (the ears).
+  model_size: base   # tiny=fastest/least accurate, base=good demo balance, small=better+slower
+  language: en
+  beam_size: 5       # higher = more accurate, slower
+
+vad:
+  # Voice activity detection: is this frame speech or not?
+  aggressiveness: 2  # 0-3. Low: background noise counts as speech (bot "hears" the TV).
+                     # High: soft speech gets dropped (bot misses quiet callers).
+  frame_ms: 30       # analysis window; webrtcvad supports 10/20/30
+
+endpointing:
+  # The hardest knob on a phone call: deciding the caller has FINISHED talking.
+  silence_after_speech_ms: 800   # lower (300): bot interrupts mid-sentence pauses.
+                                 # higher (2000): awkward dead air before every reply.
+  min_speech_ms: 200             # blips shorter than this are ignored (coughs, taps)
+  pre_speech_buffer_ms: 300      # audio kept from just before speech was detected,
+                                 # so the first syllable isn't clipped
+  max_utterance_s: 15            # hard cap per turn
+  max_wait_s: 10                 # give up listening if the caller says nothing

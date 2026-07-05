@@ -1,16 +1,18 @@
-"""Collections voice agent -- stage 1: the brain on rails (text chat).
+"""Collections voice agent -- entry point.
 
-Run from the project root:
-    .venv\\Scripts\\python.exe src\\main.py
+Text call:   .venv\\Scripts\\python.exe src\\main.py
+Voice call:  .venv\\Scripts\\python.exe src\\main.py --voice
 
-You play the customer typing replies; Maya answers via the LLM.
-Type 'quit' to hang up.
+Type/say 'bye' to hang up.
 """
 
 import os
+import sys
+import time
 
 from dotenv import load_dotenv
 
+import calllog
 import rag
 from brain import ask_brain, build_system_prompt
 from records import format_record, load_customers
@@ -20,19 +22,24 @@ OPENING = (
     "regarding your account. Am I speaking with {name}?"
 )
 
+HANGUP_WORDS = {"quit", "exit", "bye", "goodbye"}
+
 
 def pick_customer(customers):
     print("Which customer is Maya dialling today?\n")
     for i, customer in enumerate(customers, start=1):
         print(f"  {i}. {customer['name']} (balance: {customer['balance']} rupees)")
+    valid = {str(n) for n in range(1, len(customers) + 1)}
     while True:
-        choice = input("\nPick 1-3: ").strip()
-        if choice in {"1", "2", "3"}:
+        choice = input(f"\nPick 1-{len(customers)}: ").strip()
+        if choice in valid:
             return customers[int(choice) - 1]
         print("Just the digit, e.g. 1")
 
 
 def main():
+    voice_mode = "--voice" in sys.argv
+
     load_dotenv()
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key or api_key.startswith("paste"):
@@ -43,9 +50,18 @@ def main():
     print("Indexing bank policies...")
     policy_index = rag.build_index(api_key)
 
+    cfg = asr_model = None
+    if voice_mode:
+        import voice
+
+        cfg = voice.load_config()
+        print("Loading the speech recognition model...")
+        asr_model = voice.load_asr_model(cfg)
+
     customers = load_customers()
     customer = pick_customer(customers)
     record_text = format_record(customer)
+    log_path = calllog.start_call(customer["name"], "voice" if voice_mode else "text")
 
     print("\n--- ringing... call connected ---\n")
 
@@ -53,13 +69,39 @@ def main():
     # compliance-critical wording should be deterministic, every call.
     opening = OPENING.format(name=customer["name"])
     print(f"Maya: {opening}\n")
+    if voice_mode:
+        import voice
+
+        voice.speak(opening, cfg)
     history = [{"role": "model", "text": opening}]
 
     while True:
-        user_text = input("You: ").strip()
-        if not user_text:
-            continue
-        if user_text.lower() in {"quit", "exit", "bye"}:
+        timings = {}
+
+        if voice_mode:
+            import voice
+
+            print("(listening...)")
+            t0 = time.perf_counter()
+            user_text = voice.listen(cfg, asr_model)
+            timings["asr_ms"] = round((time.perf_counter() - t0) * 1000)
+            if not user_text:
+                print("(heard nothing)")
+                voice.speak("Sorry, I didn't catch that. Could you say that again?", cfg)
+                continue
+            print(f"You: {user_text}")
+        else:
+            user_text = input("You: ").strip()
+            if not user_text:
+                continue
+
+        if user_text.lower().strip(" .!?") in HANGUP_WORDS:
+            closing = "Thank you for your time. Goodbye!"
+            print(f"\nMaya: {closing}")
+            if voice_mode:
+                import voice
+
+                voice.speak(closing, cfg)
             print("\n--- call ended ---")
             break
 
@@ -67,13 +109,32 @@ def main():
 
         # Fresh retrieval every turn: the briefing is rebuilt with whichever
         # policy sections are closest in meaning to what the caller just said.
+        t0 = time.perf_counter()
         policy_chunks = rag.retrieve(api_key, policy_index, user_text)
+        timings["retrieval_ms"] = round((time.perf_counter() - t0) * 1000)
         policy_text = rag.format_policy_context(policy_chunks)
         system_prompt = build_system_prompt(customer, record_text, policy_text)
 
+        t0 = time.perf_counter()
         reply = ask_brain(api_key, system_prompt, history)
+        timings["llm_ms"] = round((time.perf_counter() - t0) * 1000)
         history.append({"role": "model", "text": reply})
         print(f"\nMaya: {reply}\n")
+
+        if voice_mode:
+            import voice
+
+            t0 = time.perf_counter()
+            voice.speak(reply, cfg)
+            timings["tts_ms"] = round((time.perf_counter() - t0) * 1000)
+
+        calllog.log_turn(
+            log_path,
+            user_text,
+            reply,
+            [f"{c['doc']} / {c['heading']}" for c in policy_chunks],
+            timings,
+        )
 
 
 if __name__ == "__main__":
