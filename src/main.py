@@ -10,12 +10,15 @@ import os
 import sys
 import time
 
+import requests
 from dotenv import load_dotenv
 
 import calllog
 import rag
 from brain import ask_brain, build_system_prompt
 from records import format_record, load_customers
+
+RETRY_LINE = "I'm sorry, I'm having a brief technical issue. Could you say that once more?"
 
 OPENING = (
     "Hi, this is Maya, an automated assistant calling from Horizon Bank "
@@ -50,7 +53,7 @@ def main():
     print("Indexing bank policies...")
     policy_index = rag.build_index(api_key)
 
-    cfg = asr_model = None
+    cfg = asr_model = voice = None
     if voice_mode:
         import voice
 
@@ -70,8 +73,6 @@ def main():
     opening = OPENING.format(name=customer["name"])
     print(f"Maya: {opening}\n")
     if voice_mode:
-        import voice
-
         voice.speak(opening, cfg)
     history = [{"role": "model", "text": opening}]
 
@@ -79,8 +80,6 @@ def main():
         timings = {}
 
         if voice_mode:
-            import voice
-
             print("(listening...)")
             t0 = time.perf_counter()
             user_text = voice.listen(cfg, asr_model)
@@ -99,8 +98,6 @@ def main():
             closing = "Thank you for your time. Goodbye!"
             print(f"\nMaya: {closing}")
             if voice_mode:
-                import voice
-
                 voice.speak(closing, cfg)
             print("\n--- call ended ---")
             break
@@ -109,21 +106,28 @@ def main():
 
         # Fresh retrieval every turn: the briefing is rebuilt with whichever
         # policy sections are closest in meaning to what the caller just said.
+        # A retrieval failure degrades to "no policy context", never a crash.
         t0 = time.perf_counter()
-        policy_chunks = rag.retrieve(api_key, policy_index, user_text)
+        try:
+            policy_chunks = rag.retrieve(api_key, policy_index, user_text)
+        except requests.RequestException:
+            policy_chunks = []
         timings["retrieval_ms"] = round((time.perf_counter() - t0) * 1000)
         policy_text = rag.format_policy_context(policy_chunks)
         system_prompt = build_system_prompt(customer, record_text, policy_text)
 
+        # A phone bot must never go silent: if the LLM call fails (rate
+        # limit, network), Maya asks the caller to repeat instead of crashing.
         t0 = time.perf_counter()
-        reply = ask_brain(api_key, system_prompt, history)
+        try:
+            reply = ask_brain(api_key, system_prompt, history)
+        except requests.RequestException:
+            reply = RETRY_LINE
         timings["llm_ms"] = round((time.perf_counter() - t0) * 1000)
         history.append({"role": "model", "text": reply})
         print(f"\nMaya: {reply}\n")
 
         if voice_mode:
-            import voice
-
             t0 = time.perf_counter()
             voice.speak(reply, cfg)
             timings["tts_ms"] = round((time.perf_counter() - t0) * 1000)

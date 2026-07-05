@@ -92,7 +92,15 @@ def ask_brain(api_key, system_prompt, history):
         "system_instruction": {"parts": [{"text": system_prompt}]},
         "contents": contents,
     }
-    response = requests.post(URL, params={"key": api_key}, json=body, timeout=30)
+    # Key travels in a header, never in the URL: query strings end up in
+    # tracebacks and server logs.
+    response = requests.post(
+        URL, headers={"x-goog-api-key": api_key}, json=body, timeout=30
+    )
     response.raise_for_status()
     data = response.json()
-    return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    try:
+        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except (KeyError, IndexError):
+        # Blocked or empty response -- the bot must never go silent.
+        return "I'm sorry, I'm having a brief technical issue. Could you say that once more?"

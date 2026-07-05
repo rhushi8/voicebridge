@@ -60,7 +60,9 @@ def embed(api_key, text):
         "model": f"models/{EMBED_MODEL}",
         "content": {"parts": [{"text": text}]},
     }
-    response = requests.post(EMBED_URL, params={"key": api_key}, json=body, timeout=30)
+    response = requests.post(
+        EMBED_URL, headers={"x-goog-api-key": api_key}, json=body, timeout=30
+    )
     response.raise_for_status()
     return response.json()["embedding"]["values"]
 
@@ -70,7 +72,8 @@ def build_index(api_key):
     chunks = load_policy_chunks()
     if INDEX_FILE.exists():
         cached = json.loads(INDEX_FILE.read_text(encoding="utf-8"))
-        if [c["text"] for c in cached] == [c["text"] for c in chunks]:
+        key = lambda c: (c["doc"], c["heading"], c["text"])
+        if [key(c) for c in cached] == [key(c) for c in chunks]:
             return cached
 
     for chunk in chunks:
