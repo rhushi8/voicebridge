@@ -27,7 +27,7 @@
   {
     "name": "Amit Joshi",
     "phone": "+91-98200-33333",
-    "balance": 45500,
+    "balance": 1122500,
     "due_date": "2026-05-30",
     "last_payment": { "amount": 5000, "date": "2026-03-22" },
     "language": "en",

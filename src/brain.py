@@ -14,6 +14,8 @@ from datetime import date
 
 import requests
 
+import emi
+
 MODEL = "llama-3.3-70b-versatile"
 URL = "https://api.groq.com/openai/v1/chat/completions"
 
@@ -64,11 +66,19 @@ Hard rules, in priority order:
    text states general rules; for THIS customer's specific figures, the
    customer record remains the only source.
 
+7. PAYMENT PLANS / EMI -- If the customer asks about installments, EMIs, or a
+   payment plan, quote ONLY the pre-computed plan options given below. NEVER
+   calculate, estimate, divide, or invent an installment amount yourself --
+   the exact figures have already been worked out for you. If they pick a
+   tenure, restate that option's exact monthly figure.
+
 If the outstanding balance is 0, this account is settled: thank them, apologise
 for any confusion, and end the call warmly.
 
 Customer record (your only source of facts):
 {record}
+
+{plan}
 
 Bank policy excerpts retrieved for the customer's latest message:
 {policy}
@@ -80,6 +90,7 @@ def build_system_prompt(customer, record_text, policy_text="(none retrieved for 
         name=customer["name"],
         record=record_text,
         today=date.today().isoformat(),
+        plan=emi.format_plan_options(customer["balance"]),
         policy=policy_text,
     )
 
