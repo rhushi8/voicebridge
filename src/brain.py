@@ -1,9 +1,12 @@
-"""The bot's brain: builds Maya's briefing and calls the Gemini API.
+"""The bot's brain: builds Maya's briefing and calls the Groq chat API.
 
 The LLM never sees the bank's systems. It sees exactly one thing: the briefing
 we hand it (persona + guardrails + this customer's record). Every fact it is
 allowed to speak is in that briefing -- that is the architectural guarantee
 behind guardrail #1, not a polite request.
+
+Groq runs the brain (fast + generous free tier). RAG embeddings still use
+Gemini -- see rag.py. The two jobs use two providers on purpose.
 """
 
 import time
@@ -11,14 +14,15 @@ from datetime import date
 
 import requests
 
-MODEL = "gemini-2.5-flash-lite"
-URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"
+MODEL = "llama-3.3-70b-versatile"
+URL = "https://api.groq.com/openai/v1/chat/completions"
 
 SYSTEM_TEMPLATE = """You are Maya, an automated voice assistant calling on behalf of
 Horizon Bank's collections team. You are speaking on a live phone call, so answer
 in ONE short sentence whenever possible, and never more than two. Long replies
 make the call drag and get spoken slowly -- be brief and natural. No lists, no
-markdown, no emojis.
+markdown, no emojis. Speak dates and amounts the way a person says them aloud:
+"July 15th, 2026" not "2026-07-15", and "8,200 rupees" not "8200".
 
 Today's date is {today}. Compare every date in the record against today before
 speaking: a due date after today is upcoming ("is due"), not missed ("was due").
@@ -87,23 +91,23 @@ def ask_brain(api_key, system_prompt, history):
     resend the entire history every turn -- the "memory" of the conversation
     lives here in our code, not in the model.
     """
-    contents = []
+    # Groq speaks the OpenAI chat format: a system message carries the briefing,
+    # then the conversation turns. Our history labels Maya's turns "model"; this
+    # API calls that role "assistant", so we translate on the way out.
+    messages = [{"role": "system", "content": system_prompt}]
     for turn in history:
-        contents.append({"role": turn["role"], "parts": [{"text": turn["text"]}]})
+        role = "assistant" if turn["role"] == "model" else "user"
+        messages.append({"role": role, "content": turn["text"]})
 
-    body = {
-        "system_instruction": {"parts": [{"text": system_prompt}]},
-        "contents": contents,
-    }
-    # Key travels in a header, never in the URL: query strings end up in
-    # tracebacks and server logs.
-    #
-    # One retry on a transient server error (5xx) or network hiccup: Google's
-    # API occasionally blips for a moment, and a fresh attempt a second later
-    # usually succeeds. A 429 (quota exhausted) is NOT transient on this
-    # timescale, so it is raised immediately instead of wasting a retry.
+    # Low temperature = steadier, more rule-obedient replies. This is a
+    # compliance bot, not a creative writer.
+    body = {"model": MODEL, "messages": messages, "temperature": 0.3}
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    # One retry on a transient server error (5xx) or network hiccup; a 429
+    # (rate limited) is not transient on this timescale, so it is raised at once.
     def call_once():
-        r = requests.post(URL, headers={"x-goog-api-key": api_key}, json=body, timeout=30)
+        r = requests.post(URL, headers=headers, json=body, timeout=30)
         r.raise_for_status()
         return r
 
@@ -117,7 +121,7 @@ def ask_brain(api_key, system_prompt, history):
 
     data = response.json()
     try:
-        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        return data["choices"][0]["message"]["content"].strip()
     except (KeyError, IndexError):
         # Blocked or empty response -- the bot must never go silent.
         return "I'm sorry, I'm having a brief technical issue. Could you say that once more?"

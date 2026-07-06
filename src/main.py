@@ -44,14 +44,19 @@ def main():
     voice_mode = "--voice" in sys.argv
 
     load_dotenv()
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key or api_key.startswith("paste"):
-        print("No API key found. Copy .env.example to .env and paste your")
-        print("Gemini key (aistudio.google.com/apikey) after GEMINI_API_KEY=")
+    gemini_key = os.getenv("GEMINI_API_KEY")  # embeddings for RAG (rag.py)
+    groq_key = os.getenv("GROQ_API_KEY")      # the LLM brain (brain.py)
+    if not gemini_key or gemini_key.startswith("paste"):
+        print("No GEMINI_API_KEY in .env — needed for RAG embeddings.")
+        print("Get one free at aistudio.google.com/apikey")
+        return
+    if not groq_key:
+        print("No GROQ_API_KEY in .env — needed for Maya's brain.")
+        print("Get one free at console.groq.com")
         return
 
     print("Indexing bank policies...")
-    policy_index = rag.build_index(api_key)
+    policy_index = rag.build_index(gemini_key)
 
     cfg = asr_model = voice = None
     if voice_mode:
@@ -115,7 +120,7 @@ def main():
         # A retrieval failure degrades to "no policy context", never a crash.
         t0 = time.perf_counter()
         try:
-            policy_chunks = rag.retrieve(api_key, policy_index, retrieval_query)
+            policy_chunks = rag.retrieve(gemini_key, policy_index, retrieval_query)
         except requests.RequestException:
             policy_chunks = []
         timings["retrieval_ms"] = round((time.perf_counter() - t0) * 1000)
@@ -127,12 +132,11 @@ def main():
         # The real reason is printed to the console for whoever runs the bot.
         t0 = time.perf_counter()
         try:
-            reply = ask_brain(api_key, system_prompt, history)
+            reply = ask_brain(groq_key, system_prompt, history)
         except requests.RequestException as e:
             status = getattr(e.response, "status_code", None)
             if status == 429:
-                print(f"  [{MODEL} free-tier daily quota exhausted — try again tomorrow, "
-                      f"or switch MODEL in brain.py to a model with quota left]")
+                print(f"  [{MODEL} rate limit hit — wait a moment and retry]")
             else:
                 print(f"  [model call failed after 1 retry: {e}]")
             reply = RETRY_LINE
