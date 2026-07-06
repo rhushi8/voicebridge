@@ -5,7 +5,7 @@
 tts:
   # Voice and prosody (how Maya sounds). en-IN-NeerjaNeural = Indian English.
   voice: en-IN-NeerjaNeural
-  rate: "+0%"      # faster (+20%) sounds rushed/pushy; slower (-20%) sounds robotic
+  rate: "+8%"      # slightly brisk = snappier calls; +20% sounds rushed/pushy, -20% robotic
   pitch: "+0Hz"    # small changes only; large ones sound unnatural
   volume: "+0%"
 
