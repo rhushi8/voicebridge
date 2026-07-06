@@ -94,7 +94,8 @@ def main():
             if not user_text:
                 continue
 
-        if user_text.lower().strip(" .!?") in HANGUP_WORDS:
+        spoken_words = {w.strip(".,!?;:") for w in user_text.lower().split()}
+        if spoken_words & HANGUP_WORDS:
             closing = "Thank you for your time. Goodbye!"
             print(f"\nMaya: {closing}")
             if voice_mode:
@@ -104,12 +105,17 @@ def main():
 
         history.append({"role": "user", "text": user_text})
 
-        # Fresh retrieval every turn: the briefing is rebuilt with whichever
-        # policy sections are closest in meaning to what the caller just said.
+        # Retrieve on a context window, not just the latest words. A one-word
+        # reply like "yes" carries no meaning on its own, so a short follow-up
+        # borrows Maya's previous line to find the policy the caller means.
+        retrieval_query = user_text
+        if len(user_text.split()) <= 3 and len(history) >= 2:
+            retrieval_query = history[-2]["text"] + " " + user_text
+
         # A retrieval failure degrades to "no policy context", never a crash.
         t0 = time.perf_counter()
         try:
-            policy_chunks = rag.retrieve(api_key, policy_index, user_text)
+            policy_chunks = rag.retrieve(api_key, policy_index, retrieval_query)
         except requests.RequestException:
             policy_chunks = []
         timings["retrieval_ms"] = round((time.perf_counter() - t0) * 1000)
