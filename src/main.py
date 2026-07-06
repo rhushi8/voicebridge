@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 import calllog
 import rag
-from brain import ask_brain, build_system_prompt
+from brain import MODEL, ask_brain, build_system_prompt
 from records import format_record, load_customers
 
 RETRY_LINE = "I'm sorry, I'm having a brief technical issue. Could you say that once more?"
@@ -131,9 +131,10 @@ def main():
         except requests.RequestException as e:
             status = getattr(e.response, "status_code", None)
             if status == 429:
-                print("  [free-tier rate limit hit — wait ~1 minute between calls]")
+                print(f"  [{MODEL} free-tier daily quota exhausted — try again tomorrow, "
+                      f"or switch MODEL in brain.py to a model with quota left]")
             else:
-                print(f"  [model call failed: {e}]")
+                print(f"  [model call failed after 1 retry: {e}]")
             reply = RETRY_LINE
         timings["llm_ms"] = round((time.perf_counter() - t0) * 1000)
         history.append({"role": "model", "text": reply})

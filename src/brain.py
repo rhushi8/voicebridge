@@ -6,6 +6,7 @@ allowed to speak is in that briefing -- that is the architectural guarantee
 behind guardrail #1, not a polite request.
 """
 
+import time
 from datetime import date
 
 import requests
@@ -94,10 +95,24 @@ def ask_brain(api_key, system_prompt, history):
     }
     # Key travels in a header, never in the URL: query strings end up in
     # tracebacks and server logs.
-    response = requests.post(
-        URL, headers={"x-goog-api-key": api_key}, json=body, timeout=30
-    )
-    response.raise_for_status()
+    #
+    # One retry on a transient server error (5xx) or network hiccup: Google's
+    # API occasionally blips for a moment, and a fresh attempt a second later
+    # usually succeeds. A 429 (quota exhausted) is NOT transient on this
+    # timescale, so it is raised immediately instead of wasting a retry.
+    def call_once():
+        r = requests.post(URL, headers={"x-goog-api-key": api_key}, json=body, timeout=30)
+        r.raise_for_status()
+        return r
+
+    try:
+        response = call_once()
+    except requests.HTTPError as e:
+        if e.response.status_code == 429:
+            raise
+        time.sleep(1.5)
+        response = call_once()
+
     data = response.json()
     try:
         return data["candidates"][0]["content"]["parts"][0]["text"].strip()
