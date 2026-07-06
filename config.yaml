@@ -11,7 +11,7 @@ tts:
 
 asr:
   # Speech-to-text (the ears).
-  model_size: base   # tiny=fastest/least accurate, base=good demo balance, small=better+slower
+  model_size: small   # tiny=fastest/least accurate, base=good demo balance, small=better+slower
   language: en
   beam_size: 5       # higher = more accurate, slower
 

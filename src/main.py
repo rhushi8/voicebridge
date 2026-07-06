@@ -124,10 +124,16 @@ def main():
 
         # A phone bot must never go silent: if the LLM call fails (rate
         # limit, network), Maya asks the caller to repeat instead of crashing.
+        # The real reason is printed to the console for whoever runs the bot.
         t0 = time.perf_counter()
         try:
             reply = ask_brain(api_key, system_prompt, history)
-        except requests.RequestException:
+        except requests.RequestException as e:
+            status = getattr(e.response, "status_code", None)
+            if status == 429:
+                print("  [free-tier rate limit hit — wait ~1 minute between calls]")
+            else:
+                print(f"  [model call failed: {e}]")
             reply = RETRY_LINE
         timings["llm_ms"] = round((time.perf_counter() - t0) * 1000)
         history.append({"role": "model", "text": reply})
@@ -148,4 +154,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n--- call ended (interrupted) ---")
