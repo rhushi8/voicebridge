@@ -10,7 +10,7 @@ from datetime import date
 
 import requests
 
-MODEL = "gemini-2.5-flash"
+MODEL = "gemini-2.5-flash-lite"
 URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"
 
 SYSTEM_TEMPLATE = """You are Maya, an automated voice assistant calling on behalf of
