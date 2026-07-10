@@ -39,6 +39,13 @@ MIRANDA = (
 
 HANGUP_WORDS = {"quit", "exit", "bye", "goodbye"}
 
+# An outcome tag (PTP/PLAN/SETTLE) only counts if the customer's latest words
+# actually sound like assent -- the model provably tags its own offers too.
+# ponytail: word-set heuristic; swap for an LLM confirmation pass if it misses.
+ASSENT_WORDS = {"yes", "yeah", "yep", "okay", "ok", "sure", "fine", "agreed",
+                "agree", "deal", "done", "works", "confirm", "confirmed",
+                "haan", "theek", "accha"}
+
 # Control tags the brain may append to a reply; parse_tags() strips them all.
 TAG_PATTERN = re.compile(r"<<([A-Z_]+)(?:\|([^>]*))?>>")
 
@@ -101,7 +108,7 @@ def main():
     customers = load_customers()
     customer = pick_customer(customers)
 
-    # Pre-call scrub (a production collections platform's "Scrubber" pattern): accounts flagged for
+    # Pre-call scrub (a standard collections-platform pattern): accounts flagged for
     # bankruptcy must never be collection-called at all.
     if "bankruptcy" in customer.get("flags", []):
         print(f"\n[scrubbed] {customer['name']} has a bankruptcy flag — "
@@ -127,159 +134,173 @@ def main():
     disposition = "NO_AGREEMENT"
     sms_sent_for = set()
 
-    while True:
-        timings = {}
+    # One write point for the outcome, however the call ends -- hangup
+    # word, transfer, wrong party, or Ctrl+C.
+    try:
+        while True:
+            timings = {}
 
-        if voice_mode:
-            print("(listening...)")
-            t0 = time.perf_counter()
-            user_text = voice.listen(cfg, asr_model)
-            timings["asr_ms"] = round((time.perf_counter() - t0) * 1000)
-            if not user_text:
-                print("(heard nothing)")
-                voice.speak("Sorry, I didn't catch that. Could you say that again?", cfg)
-                continue
-            print(f"You: {user_text}")
-        else:
-            user_text = input("You: ").strip()
-            if not user_text:
-                continue
-
-        spoken_words = {w.strip(".,!?;:") for w in user_text.lower().split()}
-        if spoken_words & HANGUP_WORDS:
-            closing = "Thank you for your time. Goodbye!"
-            print(f"\nMaya: {closing}")
             if voice_mode:
-                voice.speak(closing, cfg)
-            print("\n--- call ended ---")
-            calllog.end_call(log_path, disposition)
-            break
-
-        history.append({"role": "user", "text": user_text})
-
-        # Retrieve on a context window, not just the latest words. A one-word
-        # reply like "yes" carries no meaning on its own, so a short follow-up
-        # borrows Maya's previous line to find the policy the caller means.
-        retrieval_query = user_text
-        if len(user_text.split()) <= 3 and len(history) >= 2:
-            retrieval_query = history[-2]["text"] + " " + user_text
-
-        # A retrieval failure degrades to "no policy context", never a crash.
-        t0 = time.perf_counter()
-        try:
-            policy_chunks = rag.retrieve(gemini_key, policy_index, retrieval_query)
-        except requests.RequestException:
-            policy_chunks = []
-        timings["retrieval_ms"] = round((time.perf_counter() - t0) * 1000)
-        policy_text = rag.format_policy_context(policy_chunks)
-        system_prompt = build_system_prompt(customer, record_text, policy_text)
-
-        # A phone bot must never go silent: if the LLM call fails (rate
-        # limit, network), Maya asks the caller to repeat instead of crashing.
-        # The real reason is printed to the console for whoever runs the bot.
-        t0 = time.perf_counter()
-        try:
-            reply = ask_brain(groq_key, system_prompt, history)
-        except requests.RequestException as e:
-            status = getattr(e.response, "status_code", None)
-            if status == 429:
-                print(f"  [{MODEL} rate limit hit — wait a moment and retry]")
+                print("(listening...)")
+                t0 = time.perf_counter()
+                user_text = voice.listen(cfg, asr_model)
+                timings["asr_ms"] = round((time.perf_counter() - t0) * 1000)
+                if not user_text:
+                    print("(heard nothing)")
+                    voice.speak("Sorry, I didn't catch that. Could you say that again?", cfg)
+                    continue
+                print(f"You: {user_text}")
             else:
-                print(f"  [model call failed after 1 retry: {e}]")
-            reply = RETRY_LINE
-        timings["llm_ms"] = round((time.perf_counter() - t0) * 1000)
+                user_text = input("You: ").strip()
+                if not user_text:
+                    continue
 
-        # The brain reports call events (identity verified, promise-to-pay,
-        # settlement, transfer...) as hidden control tags. The code -- not the
-        # model -- then takes the deterministic action for each.
-        reply, tags = parse_tags(reply)
-        end_call_after = None
-        turn_events = []
-
-        for tag, arg in tags:
-            if tag == "VERIFIED" and not miranda_played:
-                miranda_played = True
-                print(f"Maya: {MIRANDA}")
+            spoken_words = {w.strip(".,!?;:") for w in user_text.lower().split()}
+            if spoken_words & HANGUP_WORDS:
+                closing = "Thank you for your time. Goodbye!"
+                print(f"\nMaya: {closing}")
                 if voice_mode:
-                    voice.speak(MIRANDA, cfg)
-                turn_events.append("verified")
+                    voice.speak(closing, cfg)
+                print("\n--- call ended ---")
+                break
 
-            elif tag == "WRONG_PARTY":
-                disposition = "WRONG_PARTY"
-                end_call_after = "--- call ended (wrong party, nothing disclosed) ---"
+            history.append({"role": "user", "text": user_text})
 
-            elif tag == "TRANSFER":
-                disposition = "TRANSFERRED"
-                end_call_after = "--- call handed off to a human agent ---"
+            # Retrieve on a context window, not just the latest words. A one-word
+            # reply like "yes" carries no meaning on its own, so a short follow-up
+            # borrows Maya's previous line to find the policy the caller means.
+            retrieval_query = user_text
+            if len(user_text.split()) <= 3 and len(history) >= 2:
+                retrieval_query = history[-2]["text"] + " " + user_text
 
-            elif tag == "PTP" and arg and f"PTP|{arg}" not in sms_sent_for:
-                sms_sent_for.add(f"PTP|{arg}")
-                parts = arg.split("|")
-                try:
-                    ptp_date = date.fromisoformat(parts[0].strip())
-                    ptp_amount = int(float(parts[1].strip())) if len(parts) > 1 else customer["balance"]
-                    disposition = "PTP"
-                    turn_events.append(f"ptp {ptp_amount} by {ptp_date}")
-                    send_sms(customer["phone"],
-                             f"Horizon Bank: as agreed, pay {ptp_amount} rupees by "
-                             f"{ptp_date} here: {payment_link()}")
-                except (ValueError, IndexError):
-                    print(f"  [invalid PTP tag ignored: {arg!r}]")
-
-            elif tag == "PLAN" and arg and f"PLAN|{arg}" not in sms_sent_for:
-                sms_sent_for.add(f"PLAN|{arg}")
-                disposition = "PLAN_AGREED"
-                turn_events.append(f"plan {arg.strip()} months")
-                send_sms(customer["phone"],
-                         f"Horizon Bank: confirm your {arg.strip()}-month payment "
-                         f"plan here: {payment_link()}")
-
-            elif tag == "SETTLE" and arg and f"SETTLE|{arg}" not in sms_sent_for:
-                sms_sent_for.add(f"SETTLE|{arg}")
-                try:
-                    amount = int(float(arg.strip()))
-                    days = settlement.days_overdue(customer["due_date"])
-                    floor = settlement.settlement_floor(customer["balance"], days)
-                    if floor is None or amount < floor:
-                        # The code is the auditor: a below-authority settlement
-                        # is recorded as a violation, never silently accepted.
-                        turn_events.append(f"SETTLEMENT_VIOLATION {amount} < floor {floor}")
-                        print(f"  [audit] settlement {amount} below authority ({floor}) — flagged")
-                    else:
-                        disposition = "SETTLED"
-                        turn_events.append(f"settled {amount}")
-                        send_sms(customer["phone"],
-                                 f"Horizon Bank: complete your settlement of {amount} "
-                                 f"rupees within 7 days: {payment_link()}")
-                except ValueError:
-                    print(f"  [invalid SETTLE tag ignored: {arg!r}]")
-
-            elif tag == "DISPUTE":
-                disposition = "DISPUTE"
-                turn_events.append("dispute raised")
-
-        history.append({"role": "model", "text": reply})
-        print(f"\nMaya: {reply}\n")
-
-        if voice_mode:
+            # A retrieval failure degrades to "no policy context", never a crash.
             t0 = time.perf_counter()
-            voice.speak(reply, cfg)
-            timings["tts_ms"] = round((time.perf_counter() - t0) * 1000)
+            try:
+                policy_chunks = rag.retrieve(gemini_key, policy_index, retrieval_query)
+            except requests.RequestException:
+                policy_chunks = []
+            timings["retrieval_ms"] = round((time.perf_counter() - t0) * 1000)
+            policy_text = rag.format_policy_context(policy_chunks)
+            system_prompt = build_system_prompt(customer, record_text, policy_text)
 
-        calllog.log_turn(
-            log_path,
-            user_text,
-            reply,
-            [f"{c['doc']} / {c['heading']}" for c in policy_chunks],
-            timings,
-            events=turn_events,
-        )
+            # A phone bot must never go silent: if the LLM call fails (rate
+            # limit, network), Maya asks the caller to repeat instead of crashing.
+            # The real reason is printed to the console for whoever runs the bot.
+            t0 = time.perf_counter()
+            try:
+                reply = ask_brain(groq_key, system_prompt, history)
+            except requests.RequestException as e:
+                status = getattr(e.response, "status_code", None)
+                if status == 429:
+                    print(f"  [{MODEL} rate limit hit — wait a moment and retry]")
+                else:
+                    print(f"  [model call failed after 1 retry: {e}]")
+                reply = RETRY_LINE
+            timings["llm_ms"] = round((time.perf_counter() - t0) * 1000)
 
-        if end_call_after:
-            print(end_call_after)
-            calllog.end_call(log_path, disposition)
-            break
+            # The brain reports call events (identity verified, promise-to-pay,
+            # settlement, transfer...) as hidden control tags. The code -- not the
+            # model -- then takes the deterministic action for each.
+            reply, tags = parse_tags(reply)
+            end_call_after = None
+            turn_events = []
 
+            assented = bool(spoken_words & ASSENT_WORDS)
+
+            for tag, arg in tags:
+                if tag in ("PTP", "PLAN", "SETTLE") and not assented:
+                    turn_events.append(f"ignored unconfirmed {tag.lower()} {arg or ''}".strip())
+                    continue
+
+                if tag == "VERIFIED" and not miranda_played:
+                    miranda_played = True
+                    print(f"Maya: {MIRANDA}")
+                    if voice_mode:
+                        voice.speak(MIRANDA, cfg)
+                    turn_events.append("verified")
+
+                elif tag == "WRONG_PARTY":
+                    disposition = "WRONG_PARTY"
+                    end_call_after = "--- call ended (wrong party, nothing disclosed) ---"
+
+                elif tag == "TRANSFER":
+                    disposition = "TRANSFERRED"
+                    end_call_after = "--- call handed off to a human agent ---"
+
+                elif tag == "PTP" and arg and f"PTP|{arg}" not in sms_sent_for:
+                    sms_sent_for.add(f"PTP|{arg}")
+                    parts = arg.split("|")
+                    try:
+                        ptp_date = date.fromisoformat(parts[0].strip())
+                        ptp_amount = int(float(parts[1].strip())) if len(parts) > 1 else customer["balance"]
+                        disposition = "PTP"
+                        turn_events.append(f"ptp {ptp_amount} by {ptp_date}")
+                        send_sms(customer["phone"],
+                                 f"Horizon Bank: as agreed, pay {ptp_amount} rupees by "
+                                 f"{ptp_date} here: {payment_link()}")
+                    except (ValueError, IndexError):
+                        print(f"  [invalid PTP tag ignored: {arg!r}]")
+
+                elif tag == "PLAN" and arg and f"PLAN|{arg}" not in sms_sent_for:
+                    sms_sent_for.add(f"PLAN|{arg}")
+                    disposition = "PLAN_AGREED"
+                    turn_events.append(f"plan {arg.strip()} months")
+                    send_sms(customer["phone"],
+                             f"Horizon Bank: confirm your {arg.strip()}-month payment "
+                             f"plan here: {payment_link()}")
+
+                elif tag == "SETTLE" and arg and f"SETTLE|{arg}" not in sms_sent_for:
+                    sms_sent_for.add(f"SETTLE|{arg}")
+                    try:
+                        amount = int(float(arg.strip()))
+                        days = settlement.days_overdue(customer["due_date"])
+                        floor = settlement.settlement_floor(customer["balance"], days)
+                        if floor is None or amount < floor:
+                            # The code is the auditor AND the enforcer: a
+                            # below-authority acceptance is flagged, and the spoken
+                            # reply is replaced so the customer never hears a yes.
+                            turn_events.append(f"SETTLEMENT_VIOLATION {amount} < floor {floor}")
+                            print(f"  [audit] settlement {amount} below authority ({floor}) — blocked")
+                            reply = ("I'm sorry, I spoke too soon -- I'm actually not able "
+                                     "to accept that amount. I can connect you with a human "
+                                     "agent to discuss further options, or we can look at a "
+                                     "payment plan instead.")
+                        else:
+                            disposition = "SETTLED"
+                            turn_events.append(f"settled {amount}")
+                            send_sms(customer["phone"],
+                                     f"Horizon Bank: complete your settlement of {amount} "
+                                     f"rupees within 7 days: {payment_link()}")
+                    except ValueError:
+                        print(f"  [invalid SETTLE tag ignored: {arg!r}]")
+
+                elif tag == "DISPUTE":
+                    disposition = "DISPUTE"
+                    turn_events.append("dispute raised")
+
+            history.append({"role": "model", "text": reply})
+            print(f"\nMaya: {reply}\n")
+
+            if voice_mode:
+                t0 = time.perf_counter()
+                voice.speak(reply, cfg)
+                timings["tts_ms"] = round((time.perf_counter() - t0) * 1000)
+
+            calllog.log_turn(
+                log_path,
+                user_text,
+                reply,
+                [f"{c['doc']} / {c['heading']}" for c in policy_chunks],
+                timings,
+                events=turn_events,
+            )
+
+            if end_call_after:
+                print(end_call_after)
+                break
+
+    finally:
+        calllog.end_call(log_path, disposition)
 
 if __name__ == "__main__":
     try:

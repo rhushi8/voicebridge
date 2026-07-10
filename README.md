@@ -1,6 +1,6 @@
-# Collections Voice Agent
+# VoiceBridge
 
-A GenAI-powered debt-collections assistant for a fictional bank ("Horizon
+A GenAI-powered debt-collections voice agent for a fictional bank ("Horizon
 Bank") — built end to end the way a Forward Deployed AI Engineer would:
 an LLM brain with hard guardrails, RAG over bank policy documents, a real
 ASR/TTS voice layer, tunable VAD/endpointing configuration, deterministic
