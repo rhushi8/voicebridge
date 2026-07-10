@@ -7,14 +7,18 @@ Type/say 'bye' to hang up.
 """
 
 import os
+import re
 import sys
 import time
+import uuid
+from datetime import date
 
 import requests
 from dotenv import load_dotenv
 
 import calllog
 import rag
+import settlement
 from brain import MODEL, ask_brain, build_system_prompt
 from records import format_record, load_customers
 
@@ -25,8 +29,35 @@ OPENING = (
     "regarding your account. Am I speaking with {name}?"
 )
 
+# The legally required debt-collection disclosure (the "mini-Miranda").
+# Scripted in code and played right after identity is confirmed -- never
+# before (revealing the debt to a wrong party is itself a violation).
+MIRANDA = (
+    "Please note, this is an attempt to collect a debt, and any information "
+    "obtained will be used for that purpose."
+)
+
 HANGUP_WORDS = {"quit", "exit", "bye", "goodbye"}
-TRANSFER_TAG = "<<TRANSFER>>"
+
+# Control tags the brain may append to a reply; parse_tags() strips them all.
+TAG_PATTERN = re.compile(r"<<([A-Z_]+)(?:\|([^>]*))?>>")
+
+
+def parse_tags(reply):
+    """Return (clean_reply, [(tag, arg_string), ...])."""
+    tags = TAG_PATTERN.findall(reply)
+    clean = TAG_PATTERN.sub("", reply).strip()
+    return clean, tags
+
+
+def send_sms(phone, text):
+    """Simulated SMS gateway: in production this would call Twilio or similar."""
+    print(f"  [sms -> {phone}] {text}")
+    return text
+
+
+def payment_link():
+    return f"https://pay.horizonbank.example/{uuid.uuid4().hex[:8]}"
 
 
 def pick_customer(customers):
@@ -69,6 +100,16 @@ def main():
 
     customers = load_customers()
     customer = pick_customer(customers)
+
+    # Pre-call scrub (a production collections platform's "Scrubber" pattern): accounts flagged for
+    # bankruptcy must never be collection-called at all.
+    if "bankruptcy" in customer.get("flags", []):
+        print(f"\n[scrubbed] {customer['name']} has a bankruptcy flag — "
+              "collection calls are not permitted; account routed to legal.")
+        log_path = calllog.start_call(customer["name"], "voice" if voice_mode else "text")
+        calllog.end_call(log_path, "SCRUBBED_BANKRUPTCY")
+        return
+
     record_text = format_record(customer)
     log_path = calllog.start_call(customer["name"], "voice" if voice_mode else "text")
 
@@ -81,6 +122,10 @@ def main():
     if voice_mode:
         voice.speak(opening, cfg)
     history = [{"role": "model", "text": opening}]
+
+    miranda_played = False
+    disposition = "NO_AGREEMENT"
+    sms_sent_for = set()
 
     while True:
         timings = {}
@@ -107,6 +152,7 @@ def main():
             if voice_mode:
                 voice.speak(closing, cfg)
             print("\n--- call ended ---")
+            calllog.end_call(log_path, disposition)
             break
 
         history.append({"role": "user", "text": user_text})
@@ -143,12 +189,74 @@ def main():
             reply = RETRY_LINE
         timings["llm_ms"] = round((time.perf_counter() - t0) * 1000)
 
-        # The brain signals a real handoff by ending its message with a hidden
-        # control tag. We detect it, strip it so it is never spoken, then end
-        # the call after the handoff line -- a text-only stand-in for a proper
-        # "transfer to agent" function call.
-        transferring = TRANSFER_TAG in reply
-        reply = reply.replace(TRANSFER_TAG, "").strip()
+        # The brain reports call events (identity verified, promise-to-pay,
+        # settlement, transfer...) as hidden control tags. The code -- not the
+        # model -- then takes the deterministic action for each.
+        reply, tags = parse_tags(reply)
+        end_call_after = None
+        turn_events = []
+
+        for tag, arg in tags:
+            if tag == "VERIFIED" and not miranda_played:
+                miranda_played = True
+                print(f"Maya: {MIRANDA}")
+                if voice_mode:
+                    voice.speak(MIRANDA, cfg)
+                turn_events.append("verified")
+
+            elif tag == "WRONG_PARTY":
+                disposition = "WRONG_PARTY"
+                end_call_after = "--- call ended (wrong party, nothing disclosed) ---"
+
+            elif tag == "TRANSFER":
+                disposition = "TRANSFERRED"
+                end_call_after = "--- call handed off to a human agent ---"
+
+            elif tag == "PTP" and arg and f"PTP|{arg}" not in sms_sent_for:
+                sms_sent_for.add(f"PTP|{arg}")
+                parts = arg.split("|")
+                try:
+                    ptp_date = date.fromisoformat(parts[0].strip())
+                    ptp_amount = int(float(parts[1].strip())) if len(parts) > 1 else customer["balance"]
+                    disposition = "PTP"
+                    turn_events.append(f"ptp {ptp_amount} by {ptp_date}")
+                    send_sms(customer["phone"],
+                             f"Horizon Bank: as agreed, pay {ptp_amount} rupees by "
+                             f"{ptp_date} here: {payment_link()}")
+                except (ValueError, IndexError):
+                    print(f"  [invalid PTP tag ignored: {arg!r}]")
+
+            elif tag == "PLAN" and arg and f"PLAN|{arg}" not in sms_sent_for:
+                sms_sent_for.add(f"PLAN|{arg}")
+                disposition = "PLAN_AGREED"
+                turn_events.append(f"plan {arg.strip()} months")
+                send_sms(customer["phone"],
+                         f"Horizon Bank: confirm your {arg.strip()}-month payment "
+                         f"plan here: {payment_link()}")
+
+            elif tag == "SETTLE" and arg and f"SETTLE|{arg}" not in sms_sent_for:
+                sms_sent_for.add(f"SETTLE|{arg}")
+                try:
+                    amount = int(float(arg.strip()))
+                    days = settlement.days_overdue(customer["due_date"])
+                    floor = settlement.settlement_floor(customer["balance"], days)
+                    if floor is None or amount < floor:
+                        # The code is the auditor: a below-authority settlement
+                        # is recorded as a violation, never silently accepted.
+                        turn_events.append(f"SETTLEMENT_VIOLATION {amount} < floor {floor}")
+                        print(f"  [audit] settlement {amount} below authority ({floor}) — flagged")
+                    else:
+                        disposition = "SETTLED"
+                        turn_events.append(f"settled {amount}")
+                        send_sms(customer["phone"],
+                                 f"Horizon Bank: complete your settlement of {amount} "
+                                 f"rupees within 7 days: {payment_link()}")
+                except ValueError:
+                    print(f"  [invalid SETTLE tag ignored: {arg!r}]")
+
+            elif tag == "DISPUTE":
+                disposition = "DISPUTE"
+                turn_events.append("dispute raised")
 
         history.append({"role": "model", "text": reply})
         print(f"\nMaya: {reply}\n")
@@ -164,10 +272,12 @@ def main():
             reply,
             [f"{c['doc']} / {c['heading']}" for c in policy_chunks],
             timings,
+            events=turn_events,
         )
 
-        if transferring:
-            print("--- call handed off to a human agent ---")
+        if end_call_after:
+            print(end_call_after)
+            calllog.end_call(log_path, disposition)
             break
 
 

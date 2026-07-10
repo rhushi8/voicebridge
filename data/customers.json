@@ -6,6 +6,7 @@
     "due_date": "2026-07-15",
     "last_payment": { "amount": 1000, "date": "2026-06-08" },
     "language": "en",
+    "flags": [],
     "payment_history": [
       { "amount": 2000, "date": "2026-04-10" },
       { "amount": 1500, "date": "2026-05-12" },
@@ -19,6 +20,7 @@
     "due_date": "2026-06-20",
     "last_payment": { "amount": 4500, "date": "2026-06-18" },
     "language": "en",
+    "flags": [],
     "payment_history": [
       { "amount": 3000, "date": "2026-05-15" },
       { "amount": 4500, "date": "2026-06-18" }
@@ -31,8 +33,21 @@
     "due_date": "2026-05-30",
     "last_payment": { "amount": 5000, "date": "2026-03-22" },
     "language": "en",
+    "flags": [],
     "payment_history": [
       { "amount": 5000, "date": "2026-03-22" }
+    ]
+  },
+  {
+    "name": "Sunita Rao",
+    "phone": "+91-98200-44444",
+    "balance": 15600,
+    "due_date": "2026-04-10",
+    "last_payment": { "amount": 800, "date": "2026-02-05" },
+    "language": "en",
+    "flags": ["bankruptcy"],
+    "payment_history": [
+      { "amount": 800, "date": "2026-02-05" }
     ]
   }
 ]

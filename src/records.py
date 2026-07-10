@@ -26,6 +26,7 @@ def format_record(customer):
         f"Outstanding balance: {customer['balance']} rupees",
         f"Due date: {customer['due_date']}",
         f"Last payment: {customer['last_payment']['amount']} rupees on {customer['last_payment']['date']}",
+        f"Account flags: {', '.join(customer.get('flags', [])) or 'none'}",
         "Payment history:",
     ]
     for payment in customer["payment_history"]:

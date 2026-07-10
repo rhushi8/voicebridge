@@ -19,16 +19,28 @@ def main():
         return
 
     all_turns = []
+    dispositions = {}
     print("Calls:")
     for path in files:
         lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-        meta, turns = lines[0], lines[1:]
+        meta = lines[0]
+        disposition = "(none recorded)"
+        if len(lines) > 1 and "disposition" in lines[-1]:
+            disposition = lines[-1]["disposition"]
+            lines = lines[:-1]
+        dispositions[disposition] = dispositions.get(disposition, 0) + 1
+        turns = [l for l in lines[1:] if "timings" in l]
         all_turns.extend(turns)
         totals = [sum(t["timings"].values()) for t in turns] or [0]
         print(
             f"  {path.name}  {meta['customer']:<14} {meta['mode']:<6} "
-            f"turns={len(turns):<3} avg={sum(totals)/len(totals):.0f}ms  worst={max(totals)}ms"
+            f"turns={len(turns):<3} avg={sum(totals)/len(totals):.0f}ms  "
+            f"outcome={disposition}"
         )
+
+    print("\nCall outcomes:")
+    for outcome, count in sorted(dispositions.items(), key=lambda kv: -kv[1]):
+        print(f"  {outcome:<22} {count}")
 
     print(f"\nPer-stage latency across {len(all_turns)} turns:")
     for stage in STAGES:

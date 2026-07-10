@@ -18,16 +18,21 @@ def start_call(customer_name, mode):
     return path
 
 
-def log_turn(path, user_text, reply, retrieved, timings):
-    _append(
-        path,
-        {
-            "caller": user_text,
-            "maya": reply,
-            "retrieved": retrieved,
-            "timings": timings,
-        },
-    )
+def log_turn(path, user_text, reply, retrieved, timings, events=None):
+    record = {
+        "caller": user_text,
+        "maya": reply,
+        "retrieved": retrieved,
+        "timings": timings,
+    }
+    if events:
+        record["events"] = events
+    _append(path, record)
+
+
+def end_call(path, disposition):
+    """Final line of every call: the outcome, for recovery analytics."""
+    _append(path, {"disposition": disposition})
 
 
 def _append(path, record):

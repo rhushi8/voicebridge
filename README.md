@@ -39,10 +39,20 @@ the conversational brain — measured at ~300ms per reply — while **Gemini**
 - [x] **Deterministic EMI** — 6/9/12-month payment plans computed in Python
       with the reducing-balance formula; the LLM quotes the figures, never
       derives them
-- [x] **Human handoff** — the brain emits a hidden control tag when it escalates;
-      the code strips it, speaks the handoff line, and ends the call
+- [x] **Collections workflow** (modeled on production collections AI):
+      scripted mini-Miranda disclosure played only after identity is verified,
+      promise-to-pay capture, settlement negotiation bounded by a coded
+      authority engine, simulated SMS payment links, pre-call bankruptcy
+      scrubbing, and a disposition recorded for every call
+- [x] **Control-tag protocol** — the brain reports call events
+      (`<<VERIFIED>>`, `<<PTP|date|amt>>`, `<<SETTLE|amt>>`, `<<TRANSFER>>`,
+      `<<WRONG_PARTY>>`, `<<DISPUTE>>`) as hidden tags; the code strips them,
+      validates them (a below-floor settlement is flagged as an audit
+      violation, never silently accepted), and takes the deterministic action
 - [x] **Bot performance** — per-turn stage latencies (ASR / retrieval / LLM /
-      TTS) logged to JSONL transcripts, aggregated by `src/report.py`
+      TTS) and call outcomes logged to JSONL transcripts; `src/report.py`
+      aggregates latency stats and the disposition mix (PTP / settled / plan
+      agreed / transferred / wrong party / disputed / no agreement)
 
 ## Guardrails (in the system briefing; verified by scripted adversarial calls)
 
@@ -53,6 +63,9 @@ the conversational brain — measured at ~300ms per reply — while **Gemini**
 5. Bank-account scope only
 6. Policy answers only from retrieved excerpts, with the policy named
 7. Installment amounts quoted only from the pre-computed EMI options
+8. Settlements only within the coded authority tiers (discount grows with
+   days overdue); the floor is never revealed, and the code audits every
+   agreed amount independently of the model
 
 ## Setup
 
@@ -114,6 +127,7 @@ src/main.py          call loop (text or voice), handoff detection
 src/brain.py         system briefing, guardrails, Groq call
 src/rag.py           chunking, embeddings, retrieval
 src/emi.py           deterministic reducing-balance EMI calculator
+src/settlement.py    settlement authority tiers (negotiation bounds in code)
 src/voice.py         TTS, VAD + endpointing state machine, ASR
 src/records.py       customer record access (swappable for a real API)
 src/calllog.py       per-turn transcript + latency logging
