@@ -2,9 +2,9 @@
 
 A GenAI-powered debt-collections assistant for a fictional bank ("Horizon
 Bank") — built end to end the way a Forward Deployed AI Engineer would:
-LLM brain with hard guardrails, RAG over bank policy documents, a real
-ASR/TTS voice layer, tunable VAD/endpointing configuration, and per-turn
-performance logging.
+an LLM brain with hard guardrails, RAG over bank policy documents, a real
+ASR/TTS voice layer, tunable VAD/endpointing configuration, deterministic
+money math, and per-turn performance logging.
 
 > All customer data and policies in this repo are fictional.
 
@@ -12,38 +12,47 @@ performance logging.
 
 ```
 caller audio → VAD → ASR → endpointing → LLM + RAG → TTS → caller
-              (webrtcvad) (faster-whisper)  (Gemini)   (edge-tts)
+             (webrtcvad) (faster-whisper)   (Groq)   (edge-tts)
 ```
 
-Every conversation turn runs this loop. The LLM never invents facts: customer
-figures come only from the account record, policy answers come only from
-retrieved policy text, and compliance-critical wording (the opening
-disclosure) is scripted in code, not generated.
+Every conversation turn runs this loop. The model never invents a fact and
+never does arithmetic: customer figures come only from the account record,
+policy answers only from retrieved policy text, installment amounts only from
+a deterministic EMI calculator, and compliance-critical wording (the opening
+AI disclosure) is scripted in code rather than generated.
+
+Two providers, two jobs, on purpose: **Groq** (`llama-3.3-70b-versatile`) runs
+the conversational brain — measured at ~300ms per reply — while **Gemini**
+(`gemini-embedding-001`) computes the embeddings that power RAG retrieval.
 
 ## What's implemented
 
-- [x] Stage 1 — the brain on rails: text chat, mock customer records, LLM
-      replies where every number comes from the record, never the model
-- [x] Stage 2 — RAG: embeddings-based retrieval (`gemini-embedding-001`) over
-      bank policy docs, chunked by section, cached index, per-turn injection
-      with a calibrated similarity threshold, citations by policy name
-- [x] Stage 3 — voice: neural TTS out (`edge-tts`), local ASR in
-      (`faster-whisper`), push-free turn-taking
-- [x] Stage 4 — deep configuration: webrtcvad VAD aggressiveness, endpointing
-      silence windows, pre-speech buffering, and TTS prosody — all tunable in
-      `config.yaml`, with documented failure symptoms per knob
-- [x] Stage 5 — bot performance: per-turn stage latencies (ASR / retrieval /
-      LLM / TTS) logged to JSONL transcripts, aggregated by `src/report.py`
+- [x] **Brain on rails** — mock customer records; every number the bot speaks
+      traces to the record, never to the model
+- [x] **RAG** — embeddings retrieval over bank policy docs, chunked by
+      section, cached index, per-turn injection with a similarity threshold
+      calibrated against real queries (0.6), citations by policy name
+- [x] **Voice** — neural TTS out (`edge-tts`), local ASR in (`faster-whisper`)
+- [x] **Deep configuration** — VAD aggressiveness, endpointing silence windows,
+      pre-speech buffering, TTS prosody: all tunable in `config.yaml`, each
+      knob documented with its failure symptom
+- [x] **Deterministic EMI** — 6/9/12-month payment plans computed in Python
+      with the reducing-balance formula; the LLM quotes the figures, never
+      derives them
+- [x] **Human handoff** — the brain emits a hidden control tag when it escalates;
+      the code strips it, speaks the handoff line, and ends the call
+- [x] **Bot performance** — per-turn stage latencies (ASR / retrieval / LLM /
+      TTS) logged to JSONL transcripts, aggregated by `src/report.py`
 
-## Guardrails (enforced in the system briefing, verified by scripted attacks)
+## Guardrails (in the system briefing; verified by scripted adversarial calls)
 
 1. Facts only from the record — no invented figures, no invented explanations
 2. Identity check first; wrong person → reveal nothing
 3. No threats or pressure, ever
-4. Hardship or distress → stop collecting, offer a human agent
+4. Hardship or distress → stop collecting, hand off to a human agent
 5. Bank-account scope only
-6. Policy questions answered only from retrieved policy excerpts, with the
-   policy named
+6. Policy answers only from retrieved excerpts, with the policy named
+7. Installment amounts quoted only from the pre-computed EMI options
 
 ## Setup
 
@@ -51,8 +60,12 @@ disclosure) is scripted in code, not generated.
 py -3.12 -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-copy .env.example .env      (paste your Gemini API key into .env)
+copy .env.example .env
 ```
+
+Then add two free API keys to `.env`:
+`GROQ_API_KEY` (console.groq.com — the brain) and
+`GEMINI_API_KEY` (aistudio.google.com/apikey — RAG embeddings).
 
 ## Run
 
@@ -76,16 +89,33 @@ model; both are cached afterwards.
 | `tts.rate` | robotic drawl | rushed, pushy collector |
 | `asr.model_size` | mishears accents/numbers | slower replies |
 
+## Measured performance
+
+Per-turn latency from real logged calls (`src/report.py`):
+
+| Stage | Typical |
+|-------|---------|
+| LLM (Groq) | 270–690ms |
+| RAG retrieval | ~600ms |
+| ASR transcription (`small`) | ~1.5s |
+| TTS synthesis | ~2s |
+
+Swapping the brain from Gemini to Groq cut LLM latency from 8–14s to under
+700ms, which is what turned the demo from "waiting on hold" into a
+conversation.
+
 ## Repo layout
 
 ```
-config.yaml          all voice pipeline tuning knobs
-data/customers.json  mock account records (would be the bank's API in production)
+config.yaml          voice pipeline tuning knobs
+data/customers.json  mock account records (a bank API in production)
 data/policies/       bank policy documents (the RAG corpus)
-src/main.py          call loop (text or voice)
-src/brain.py         system briefing + Gemini call
+src/main.py          call loop (text or voice), handoff detection
+src/brain.py         system briefing, guardrails, Groq call
 src/rag.py           chunking, embeddings, retrieval
+src/emi.py           deterministic reducing-balance EMI calculator
 src/voice.py         TTS, VAD + endpointing state machine, ASR
+src/records.py       customer record access (swappable for a real API)
 src/calllog.py       per-turn transcript + latency logging
 src/report.py        performance aggregation
 logs/                call transcripts (gitignored)

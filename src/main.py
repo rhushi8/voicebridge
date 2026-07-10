@@ -26,6 +26,7 @@ OPENING = (
 )
 
 HANGUP_WORDS = {"quit", "exit", "bye", "goodbye"}
+TRANSFER_TAG = "<<TRANSFER>>"
 
 
 def pick_customer(customers):
@@ -141,6 +142,14 @@ def main():
                 print(f"  [model call failed after 1 retry: {e}]")
             reply = RETRY_LINE
         timings["llm_ms"] = round((time.perf_counter() - t0) * 1000)
+
+        # The brain signals a real handoff by ending its message with a hidden
+        # control tag. We detect it, strip it so it is never spoken, then end
+        # the call after the handoff line -- a text-only stand-in for a proper
+        # "transfer to agent" function call.
+        transferring = TRANSFER_TAG in reply
+        reply = reply.replace(TRANSFER_TAG, "").strip()
+
         history.append({"role": "model", "text": reply})
         print(f"\nMaya: {reply}\n")
 
@@ -156,6 +165,10 @@ def main():
             [f"{c['doc']} / {c['heading']}" for c in policy_chunks],
             timings,
         )
+
+        if transferring:
+            print("--- call handed off to a human agent ---")
+            break
 
 
 if __name__ == "__main__":
