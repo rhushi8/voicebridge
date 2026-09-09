@@ -17,7 +17,10 @@ import requests
 import emi
 import settlement
 
-MODEL = "llama-3.3-70b-versatile"
+# Groq retired llama-3.3-70b-versatile; found 404 model_not_found on 2026-09-09.
+# Replacement benchmarked on a real Amit turn: 745ms median here vs 839ms
+# for gpt-oss-20b. See https://console.groq.com/docs/models if this 404s.
+MODEL = "openai/gpt-oss-120b"
 URL = "https://api.groq.com/openai/v1/chat/completions"
 
 SYSTEM_TEMPLATE = """You are Maya, an automated voice assistant calling on behalf of
@@ -154,20 +157,31 @@ def ask_brain(api_key, system_prompt, history):
     body = {"model": MODEL, "messages": messages, "temperature": 0.3}
     headers = {"Authorization": f"Bearer {api_key}"}
 
-    # One retry on a transient server error (5xx) or network hiccup; a 429
-    # (rate limited) is not transient on this timescale, so it is raised at once.
-    def call_once():
-        r = requests.post(URL, headers=headers, json=body, timeout=30)
-        r.raise_for_status()
-        return r
-
-    try:
-        response = call_once()
-    except requests.HTTPError as e:
-        if e.response.status_code == 429:
-            raise
-        time.sleep(1.5)
-        response = call_once()
+    # Retry on a transient 5xx, a network hiccup, or a rate limit.
+    #
+    # The 429 rule changed when the brain moved from Gemini to Groq. On Gemini a
+    # 429 meant the DAILY quota was gone and waiting was pointless, so it was
+    # raised immediately. Groq throttles bursts instead and says how long to wait
+    # in Retry-After, so the same status code now means "try again shortly".
+    # The wait is capped: past ten seconds of dead air, the caller is better
+    # served by main.py's retry line than by more silence.
+    response = None
+    for attempt in range(3):
+        last = attempt == 2
+        try:
+            response = requests.post(URL, headers=headers, json=body, timeout=30)
+            response.raise_for_status()
+            break
+        except requests.HTTPError as e:
+            status = e.response.status_code
+            if last or not (status == 429 or status >= 500):
+                raise
+            delay = float(e.response.headers.get("retry-after", 5)) if status == 429 else 1.5
+            time.sleep(min(delay + 0.5, 10))
+        except requests.RequestException:
+            if last:
+                raise
+            time.sleep(1.5)
 
     data = response.json()
     try:
