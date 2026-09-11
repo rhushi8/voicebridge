@@ -86,11 +86,11 @@ def main():
     gemini_key = os.getenv("GEMINI_API_KEY")  # embeddings for RAG (rag.py)
     groq_key = os.getenv("GROQ_API_KEY")      # the LLM brain (brain.py)
     if not gemini_key or gemini_key.startswith("paste"):
-        print("No GEMINI_API_KEY in .env — needed for RAG embeddings.")
+        print("No GEMINI_API_KEY in .env. It runs the RAG embeddings.")
         print("Get one free at aistudio.google.com/apikey")
         return
     if not groq_key:
-        print("No GROQ_API_KEY in .env — needed for Maya's brain.")
+        print("No GROQ_API_KEY in .env. It runs Maya's brain.")
         print("Get one free at console.groq.com")
         return
 
@@ -111,8 +111,8 @@ def main():
     # Pre-call scrub (a standard collections-platform pattern): accounts flagged for
     # bankruptcy must never be collection-called at all.
     if "bankruptcy" in customer.get("flags", []):
-        print(f"\n[scrubbed] {customer['name']} has a bankruptcy flag — "
-              "collection calls are not permitted; account routed to legal.")
+        print(f"\n[scrubbed] {customer['name']} has a bankruptcy flag, so "
+              "collection calls are not permitted. Account routed to legal.")
         log_path = calllog.start_call(customer["name"], "voice" if voice_mode else "text")
         calllog.end_call(log_path, "SCRUBBED_BANKRUPTCY")
         return
@@ -192,7 +192,7 @@ def main():
             except requests.RequestException as e:
                 status = getattr(e.response, "status_code", None)
                 if status == 429:
-                    print(f"  [{MODEL} rate limit hit — wait a moment and retry]")
+                    print(f"  [{MODEL} rate limited, retries exhausted]")
                 else:
                     print(f"  [model call failed after 1 retry: {e}]")
                 reply = RETRY_LINE
@@ -260,7 +260,7 @@ def main():
                             # below-authority acceptance is flagged, and the spoken
                             # reply is replaced so the customer never hears a yes.
                             turn_events.append(f"SETTLEMENT_VIOLATION {amount} < floor {floor}")
-                            print(f"  [audit] settlement {amount} below authority ({floor}) — blocked")
+                            print(f"  [audit] settlement {amount} below authority ({floor}), blocked")
                             reply = ("I'm sorry, I spoke too soon -- I'm actually not able "
                                      "to accept that amount. I can connect you with a human "
                                      "agent to discuss further options, or we can look at a "

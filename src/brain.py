@@ -1,12 +1,12 @@
-"""The bot's brain: builds Maya's briefing and calls the Groq chat API.
+"""Maya's brain: builds the briefing and calls the Groq chat API.
 
-The LLM never sees the bank's systems. It sees exactly one thing: the briefing
-we hand it (persona + guardrails + this customer's record). Every fact it is
-allowed to speak is in that briefing -- that is the architectural guarantee
-behind guardrail #1, not a polite request.
+The LLM never touches the bank's systems. It gets one thing, the briefing built
+here: persona, guardrails, and this customer's record. Every fact it is allowed
+to say is in there, which is what makes guardrail 1 enforceable instead of a
+polite request.
 
-Groq runs the brain (fast + generous free tier). RAG embeddings still use
-Gemini -- see rag.py. The two jobs use two providers on purpose.
+Groq runs the brain. Embeddings run on Gemini, over in rag.py. Two providers
+for two jobs, on purpose.
 """
 
 import time

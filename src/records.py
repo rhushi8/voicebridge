@@ -1,9 +1,8 @@
-"""Customer records access.
+"""Customer record access.
 
-In a real deployment this module would call the bank's API to fetch a live
-customer record. For now it reads our mock database from data/customers.json --
-the interface (give me a customer record as a dict) stays the same either way,
-which is exactly why swapping it for a real API later is painless.
+In a real deployment this would call the bank's API for a live record. For now
+it reads the mock database in data/customers.json. Same interface either way,
+so swapping in a real API later touches only this file.
 """
 
 import json
