@@ -1,9 +1,3 @@
-"""Bot performance report: aggregates logs/*.jsonl into per-call and
-per-stage latency stats.
-
-Run:  .venv\\Scripts\\python.exe src\\report.py
-"""
-
 import json
 from pathlib import Path
 

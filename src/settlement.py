@@ -1,17 +1,8 @@
-"""Deterministic settlement authority (the negotiation guardrail).
-
-Real collections bots negotiate settlements, but only inside bounds the
-creditor defined -- the model must never invent a discount. Like emi.py,
-the business rules live here in code; the LLM is only told its authority
-for THIS account and quotes within it.
-
-Tiers: the longer an account has been overdue, the deeper the discount the
-bot may accept on a one-time lump-sum settlement.
-"""
+"""Settlement bounds live in code so the LLM can't invent a discount."""
 
 from datetime import date
 
-# (minimum days overdue, maximum discount) -- checked top-down.
+# (min days overdue, max discount), checked top-down.
 TIERS = (
     (180, 0.30),
     (90, 0.20),
@@ -32,7 +23,7 @@ def max_discount(days):
 
 
 def settlement_floor(balance, days):
-    """The lowest lump-sum amount the bot may accept, or None if no authority."""
+    """Lowest lump sum allowed, or None if no authority."""
     discount = max_discount(days)
     if discount == 0.0 or balance <= 0:
         return None
@@ -40,7 +31,6 @@ def settlement_floor(balance, days):
 
 
 def format_settlement_authority(customer, today=None):
-    """Render this account's negotiation bounds for the LLM briefing."""
     days = days_overdue(customer["due_date"], today)
     floor = settlement_floor(customer["balance"], days)
     if floor is None:

@@ -1,22 +1,10 @@
-"""Standalone experiment: how does silence_after_speech_ms actually behave?
-
-Mirrors the exact endpointing state machine from voice.py's listen(), but
-runs it over a scripted sequence of speech/silence frames instead of a live
-mic, so it's instant, repeatable, and needs no audio hardware.
-
-Run:  .venv\\Scripts\\python.exe src\\tune_endpointing.py
-"""
+"""Mirrors the endpointing logic in voice.py listen(). Keep them in sync."""
 
 FRAME_MS = 30  # matches config.yaml vad.frame_ms
 
 
 def simulate_turn(is_speech_frames, silence_after_speech_ms, frame_ms=FRAME_MS,
                    max_utterance_s=15):
-    """Replays voice.py's in_speech/silent_streak logic frame by frame.
-
-    Returns (end_frame_index, reason) -- end_frame_index is None if the
-    caller's sequence runs out before the turn would ever end.
-    """
     endpoint_frames = silence_after_speech_ms // frame_ms
     max_frames = max_utterance_s * 1000 // frame_ms
 
@@ -44,7 +32,6 @@ def simulate_turn(is_speech_frames, silence_after_speech_ms, frame_ms=FRAME_MS,
 
 
 def frames(speech_ms=0, silence_ms=0):
-    """N frames of speech followed by N frames of silence, as a list of bools."""
     return [True] * (speech_ms // FRAME_MS) + [False] * (silence_ms // FRAME_MS)
 
 
@@ -63,9 +50,7 @@ def main():
     print("SCENARIO 1: a natural mid-sentence pause, then more speech, then a real")
     print('end-of-turn silence.  e.g. "when is... [400ms pause] ...my payment due"')
     print("=" * 78)
-    # 1.5s talking, 400ms pause (NOT the end of the turn), 1.5s more talking,
-    # then a real 2.5s trailing silence (the actual end of the turn) -- long
-    # enough that even the highest threshold tested below gets to resolve.
+    # Talk 1.5s, 400ms pause, talk 1.5s, then 2.5s of real silence.
     scenario = (frames(speech_ms=1500) + frames(silence_ms=400) +
                 frames(speech_ms=1500) + frames(silence_ms=2500))
 

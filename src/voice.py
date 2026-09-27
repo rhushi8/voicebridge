@@ -1,8 +1,4 @@
-"""The voice layer: Maya's mouth (TTS), ears (ASR), and turn-taking sense
-(VAD + endpointing).
-
-All tunable behavior lives in config.yaml -- this module just reads it.
-"""
+"""All tunables live in config.yaml."""
 
 import asyncio
 import collections
@@ -32,7 +28,6 @@ def load_asr_model(cfg):
 
 
 def speak(text, cfg):
-    """Synthesize text with the configured voice/prosody and play it."""
     tts = cfg["tts"]
     mp3_path = Path(tempfile.gettempdir()) / f"maya_{time.time_ns()}.mp3"
 
@@ -61,14 +56,7 @@ def speak(text, cfg):
 
 
 def listen(cfg, asr_model):
-    """Record the caller until they finish their turn, then transcribe.
-
-    The turn-taking state machine:
-      waiting  -- no speech yet; keep a small rolling pre-speech buffer so the
-                  first syllable isn't lost. Give up after max_wait_s.
-      speaking -- collect audio. Every silent frame counts toward the endpoint;
-                  silence_after_speech_ms of quiet means the caller is done.
-    """
+    """Waits for speech, ends the turn after silence_after_speech_ms of quiet."""
     vad_cfg, ep = cfg["vad"], cfg["endpointing"]
     vad = webrtcvad.Vad(vad_cfg["aggressiveness"])
     frame_ms = vad_cfg["frame_ms"]

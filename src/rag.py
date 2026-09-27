@@ -1,16 +1,3 @@
-"""RAG: retrieval over Horizon Bank's policy documents.
-
-How it works:
-1. Each policy .md file is split into chunks (one per "## section").
-2. Every chunk is turned into an embedding -- a list of numbers that captures
-   its MEANING, so "can I pay in parts?" lands near the payment-plan section
-   even though they share no keywords.
-3. Embeddings are cached in data/policy_index.json so we only pay the
-   indexing cost when a policy document changes.
-4. Per turn, the caller's words are embedded too, and the closest chunks
-   (cosine similarity) are handed to the LLM as its only allowed policy source.
-"""
-
 import json
 import math
 from pathlib import Path
@@ -25,7 +12,6 @@ EMBED_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{EMBED_MOD
 
 
 def load_policy_chunks():
-    """Split every policy file into chunks: one chunk per '## section'."""
     chunks = []
     for md_file in sorted(POLICY_DIR.glob("*.md")):
         doc_title = md_file.stem
@@ -55,7 +41,6 @@ def _chunk(doc_title, heading, body_lines):
 
 
 def embed(api_key, text):
-    """Ask Gemini for the embedding (meaning-vector) of one piece of text."""
     body = {
         "model": f"models/{EMBED_MODEL}",
         "content": {"parts": [{"text": text}]},
@@ -68,7 +53,6 @@ def embed(api_key, text):
 
 
 def build_index(api_key):
-    """Embed all policy chunks, reusing the cache when documents are unchanged."""
     chunks = load_policy_chunks()
     if INDEX_FILE.exists():
         cached = json.loads(INDEX_FILE.read_text(encoding="utf-8"))
@@ -83,7 +67,6 @@ def build_index(api_key):
 
 
 def cosine(a, b):
-    """Similarity of two meaning-vectors: 1.0 = same meaning, 0 = unrelated."""
     dot = sum(x * y for x, y in zip(a, b))
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(x * x for x in b))
@@ -91,7 +74,6 @@ def cosine(a, b):
 
 
 def retrieve(api_key, index, query, top_k=2, min_score=0.6):
-    """Return the top_k policy chunks whose meaning is closest to the query."""
     query_vec = embed(api_key, query)
     scored = [(cosine(query_vec, c["embedding"]), c) for c in index]
     scored.sort(key=lambda pair: pair[0], reverse=True)
@@ -99,7 +81,6 @@ def retrieve(api_key, index, query, top_k=2, min_score=0.6):
 
 
 def format_policy_context(chunks):
-    """Render retrieved chunks as text for the LLM's briefing."""
     if not chunks:
         return "(none retrieved for this turn)"
     parts = []

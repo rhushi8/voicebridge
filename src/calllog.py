@@ -1,8 +1,4 @@
-"""Call transcripts + per-turn latency logging (bot performance evidence).
-
-One .jsonl file per call in logs/: first line is call metadata, every
-following line is one turn with its stage timings in milliseconds.
-"""
+"""One .jsonl per call: metadata line, then one line per turn with timings in ms."""
 
 import json
 import time
@@ -31,7 +27,6 @@ def log_turn(path, user_text, reply, retrieved, timings, events=None):
 
 
 def end_call(path, disposition):
-    """Final line of every call: the outcome, for recovery analytics."""
     _append(path, {"disposition": disposition})
 
 

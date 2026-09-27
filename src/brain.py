@@ -1,13 +1,4 @@
-"""Maya's brain: builds the briefing and calls the Groq chat API.
-
-The LLM never touches the bank's systems. It gets one thing, the briefing built
-here: persona, guardrails, and this customer's record. Every fact it is allowed
-to say is in there, which is what makes guardrail 1 enforceable instead of a
-polite request.
-
-Groq runs the brain. Embeddings run on Gemini, over in rag.py. Two providers
-for two jobs, on purpose.
-"""
+"""The LLM only sees this briefing. Every fact it may say lives in it."""
 
 import time
 from datetime import date
@@ -17,9 +8,7 @@ import requests
 import emi
 import settlement
 
-# Groq retired llama-3.3-70b-versatile; found 404 model_not_found on 2026-09-09.
-# Replacement benchmarked on a real Amit turn: 745ms median here vs 839ms
-# for gpt-oss-20b. See https://console.groq.com/docs/models if this 404s.
+# llama-3.3 retired 2026-09-09. This one: 745ms median vs 839ms for gpt-oss-20b.
 MODEL = "openai/gpt-oss-120b"
 URL = "https://api.groq.com/openai/v1/chat/completions"
 
@@ -138,33 +127,18 @@ def build_system_prompt(customer, record_text, policy_text="(none retrieved for 
 
 
 def ask_brain(api_key, system_prompt, history):
-    """Send the briefing + full conversation so far, return Maya's next line.
-
-    The LLM is stateless: it remembers nothing between calls. That is why we
-    resend the entire history every turn -- the "memory" of the conversation
-    lives here in our code, not in the model.
-    """
-    # Groq speaks the OpenAI chat format: a system message carries the briefing,
-    # then the conversation turns. Our history labels Maya's turns "model"; this
-    # API calls that role "assistant", so we translate on the way out.
+    """LLM is stateless, so the full history is resent every turn."""
+    # Our history says "model", this API wants "assistant".
     messages = [{"role": "system", "content": system_prompt}]
     for turn in history:
         role = "assistant" if turn["role"] == "model" else "user"
         messages.append({"role": role, "content": turn["text"]})
 
-    # Low temperature = steadier, more rule-obedient replies. This is a
-    # compliance bot, not a creative writer.
+    # Low temperature: a compliance bot, not a writer.
     body = {"model": MODEL, "messages": messages, "temperature": 0.3}
     headers = {"Authorization": f"Bearer {api_key}"}
 
-    # Retry on a transient 5xx, a network hiccup, or a rate limit.
-    #
-    # The 429 rule changed when the brain moved from Gemini to Groq. On Gemini a
-    # 429 meant the DAILY quota was gone and waiting was pointless, so it was
-    # raised immediately. Groq throttles bursts instead and says how long to wait
-    # in Retry-After, so the same status code now means "try again shortly".
-    # The wait is capped: past ten seconds of dead air, the caller is better
-    # served by main.py's retry line than by more silence.
+    # Retry 5xx, network errors and 429s. Wait capped at 10s of dead air.
     response = None
     for attempt in range(3):
         last = attempt == 2
@@ -187,5 +161,5 @@ def ask_brain(api_key, system_prompt, history):
     try:
         return data["choices"][0]["message"]["content"].strip()
     except (KeyError, IndexError):
-        # Blocked or empty response -- the bot must never go silent.
+        # Blocked or empty reply: never go silent.
         return "I'm sorry, I'm having a brief technical issue. Could you say that once more?"
