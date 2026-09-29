@@ -11,6 +11,7 @@ import settlement
 # llama-3.3 retired 2026-09-09. This one: 745ms median vs 839ms for gpt-oss-20b.
 MODEL = "openai/gpt-oss-120b"
 URL = "https://api.groq.com/openai/v1/chat/completions"
+RETRY_LINE = "I'm sorry, I'm having a brief technical issue. Could you say that once more?"
 
 SYSTEM_TEMPLATE = """You are Maya, an automated voice assistant calling on behalf of
 Horizon Bank's collections team. You are speaking on a live phone call, so answer
@@ -115,7 +116,7 @@ Bank policy excerpts retrieved for the customer's latest message:
 """
 
 
-def build_system_prompt(customer, record_text, policy_text="(none retrieved for this turn)"):
+def build_system_prompt(customer, record_text, policy_text):
     return SYSTEM_TEMPLATE.format(
         name=customer["name"],
         record=record_text,
@@ -162,4 +163,4 @@ def ask_brain(api_key, system_prompt, history):
         return data["choices"][0]["message"]["content"].strip()
     except (KeyError, IndexError):
         # Blocked or empty reply: never go silent.
-        return "I'm sorry, I'm having a brief technical issue. Could you say that once more?"
+        return RETRY_LINE

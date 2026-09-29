@@ -11,10 +11,9 @@ from dotenv import load_dotenv
 import calllog
 import rag
 import settlement
-from brain import MODEL, ask_brain, build_system_prompt
+from brain import MODEL, RETRY_LINE, ask_brain, build_system_prompt
+from endpointing import load_config
 from records import format_record, load_customers
-
-RETRY_LINE = "I'm sorry, I'm having a brief technical issue. Could you say that once more?"
 
 OPENING = (
     "Hi, this is Maya, an automated assistant calling from Horizon Bank "
@@ -88,9 +87,14 @@ def main():
     if voice_mode:
         import voice
 
-        cfg = voice.load_config()
+        cfg = load_config()
         print("Loading the speech recognition model...")
         asr_model = voice.load_asr_model(cfg)
+
+    def say(text):
+        print(f"Maya: {text}\n")
+        if voice_mode:
+            voice.speak(text, cfg)
 
     customers = load_customers()
     customer = pick_customer(customers)
@@ -110,9 +114,7 @@ def main():
 
     # Scripted, not generated: compliance wording must be deterministic.
     opening = OPENING.format(name=customer["name"])
-    print(f"Maya: {opening}\n")
-    if voice_mode:
-        voice.speak(opening, cfg)
+    say(opening)
     history = [{"role": "model", "text": opening}]
 
     miranda_played = False
@@ -141,11 +143,8 @@ def main():
 
             spoken_words = {w.strip(".,!?;:") for w in user_text.lower().split()}
             if spoken_words & HANGUP_WORDS:
-                closing = "Thank you for your time. Goodbye!"
-                print(f"\nMaya: {closing}")
-                if voice_mode:
-                    voice.speak(closing, cfg)
-                print("\n--- call ended ---")
+                say("Thank you for your time. Goodbye!")
+                print("--- call ended ---")
                 break
 
             history.append({"role": "user", "text": user_text})
@@ -173,7 +172,7 @@ def main():
                 if status == 429:
                     print(f"  [{MODEL} rate limited, retries exhausted]")
                 else:
-                    print(f"  [model call failed after 1 retry: {e}]")
+                    print(f"  [model call failed after retries: {e}]")
                 reply = RETRY_LINE
             timings["llm_ms"] = round((time.perf_counter() - t0) * 1000)
 
@@ -191,9 +190,7 @@ def main():
 
                 if tag == "VERIFIED" and not miranda_played:
                     miranda_played = True
-                    print(f"Maya: {MIRANDA}")
-                    if voice_mode:
-                        voice.speak(MIRANDA, cfg)
+                    say(MIRANDA)
                     turn_events.append("verified")
 
                 elif tag == "WRONG_PARTY":
@@ -254,11 +251,9 @@ def main():
                     turn_events.append("dispute raised")
 
             history.append({"role": "model", "text": reply})
-            print(f"\nMaya: {reply}\n")
-
+            t0 = time.perf_counter()
+            say(reply)
             if voice_mode:
-                t0 = time.perf_counter()
-                voice.speak(reply, cfg)
                 timings["tts_ms"] = round((time.perf_counter() - t0) * 1000)
 
             calllog.log_turn(

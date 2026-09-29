@@ -144,7 +144,8 @@ src/brain.py         system briefing, guardrails, Groq call
 src/rag.py           chunking, embeddings, retrieval
 src/emi.py           reducing-balance EMI calculator
 src/settlement.py    settlement authority tiers, negotiation bounds in code
-src/voice.py         TTS, VAD and endpointing state machine, ASR
+src/voice.py         TTS, VAD, ASR
+src/endpointing.py   end-of-turn decision, shared with the tuning simulator
 src/records.py       customer record access, swappable for a real API
 src/calllog.py       per-turn transcript and latency logging
 src/report.py        performance aggregation

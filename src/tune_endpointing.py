@@ -1,33 +1,17 @@
-"""Mirrors the endpointing logic in voice.py listen(). Keep them in sync."""
+from endpointing import Endpointer, load_config
 
-FRAME_MS = 30  # matches config.yaml vad.frame_ms
+CFG = load_config()
+FRAME_MS = CFG["vad"]["frame_ms"]
 
 
-def simulate_turn(is_speech_frames, silence_after_speech_ms, frame_ms=FRAME_MS,
-                   max_utterance_s=15):
-    endpoint_frames = silence_after_speech_ms // frame_ms
-    max_frames = max_utterance_s * 1000 // frame_ms
-
-    in_speech = False
-    silent_streak = 0
-    recorded = 0
-
+def simulate_turn(is_speech_frames, silence_after_speech_ms):
+    ep = CFG["endpointing"]
+    turn = Endpointer(FRAME_MS, silence_after_speech_ms, ep["max_utterance_s"], ep["max_wait_s"],
+                      ep["pre_speech_buffer_ms"])
     for i, is_speech in enumerate(is_speech_frames):
-        if not in_speech:
-            if is_speech:
-                in_speech = True
-                recorded = 1
-        else:
-            recorded += 1
-            if is_speech:
-                silent_streak = 0
-            else:
-                silent_streak += 1
-                if silent_streak >= endpoint_frames:
-                    return i, "endpoint (silence after speech)"
-            if recorded >= max_frames:
-                return i, "max_utterance_s hit"
-
+        reason = turn.step(is_speech)
+        if reason:
+            return i, reason
     return None, "sequence ended before a decision"
 
 

@@ -10,15 +10,10 @@ import edge_tts
 import numpy as np
 import sounddevice as sd
 import webrtcvad
-import yaml
 
-CONFIG_FILE = Path(__file__).parent.parent / "config.yaml"
+from endpointing import NO_SPEECH, Endpointer
+
 SAMPLE_RATE = 16000
-
-
-def load_config():
-    with open(CONFIG_FILE, encoding="utf-8") as f:
-        return yaml.safe_load(f)
 
 
 def load_asr_model(cfg):
@@ -62,17 +57,15 @@ def listen(cfg, asr_model):
     frame_ms = vad_cfg["frame_ms"]
     frame_samples = SAMPLE_RATE * frame_ms // 1000
 
-    endpoint_frames = ep["silence_after_speech_ms"] // frame_ms
-    min_speech_frames = ep["min_speech_ms"] // frame_ms
-    max_frames = ep["max_utterance_s"] * 1000 // frame_ms
-    max_wait_frames = ep["max_wait_s"] * 1000 // frame_ms
-    pre_buffer = collections.deque(maxlen=ep["pre_speech_buffer_ms"] // frame_ms)
-
+    turn = Endpointer(
+        frame_ms,
+        ep["silence_after_speech_ms"],
+        ep["max_utterance_s"],
+        ep["max_wait_s"],
+        ep["pre_speech_buffer_ms"],
+    )
+    pre_buffer = collections.deque(maxlen=turn.pre_frames)
     recorded = []
-    speech_frames = 0
-    silent_streak = 0
-    in_speech = False
-    frames_waited = 0
 
     with sd.RawInputStream(
         samplerate=SAMPLE_RATE, channels=1, dtype="int16", blocksize=frame_samples
@@ -80,30 +73,19 @@ def listen(cfg, asr_model):
         while True:
             frame, _ = stream.read(frame_samples)
             frame = bytes(frame)
-            is_speech = vad.is_speech(frame, SAMPLE_RATE)
+            was_in_speech = turn.in_speech
+            reason = turn.step(vad.is_speech(frame, SAMPLE_RATE))
 
-            if not in_speech:
-                pre_buffer.append(frame)
-                frames_waited += 1
-                if is_speech:
-                    in_speech = True
-                    recorded.extend(pre_buffer)
-                    speech_frames = 1
-                elif frames_waited >= max_wait_frames:
-                    return ""
-            else:
+            if was_in_speech:
                 recorded.append(frame)
-                if is_speech:
-                    speech_frames += 1
-                    silent_streak = 0
-                else:
-                    silent_streak += 1
-                    if silent_streak >= endpoint_frames:
-                        break
-                if len(recorded) >= max_frames:
-                    break
+            else:
+                pre_buffer.append(frame)
+                if turn.in_speech:
+                    recorded.extend(pre_buffer)
+            if reason:
+                break
 
-    if speech_frames < min_speech_frames:
+    if reason == NO_SPEECH or turn.speech_frames < ep["min_speech_ms"] // frame_ms:
         return ""
 
     audio = np.frombuffer(b"".join(recorded), dtype=np.int16).astype(np.float32) / 32768.0
