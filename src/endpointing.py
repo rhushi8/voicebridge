@@ -1,4 +1,4 @@
-"""Config loading and the end-of-turn decision, kept free of audio deps so the simulator can use them."""
+"""Config and end-of-turn logic, no audio deps."""
 
 from pathlib import Path
 
